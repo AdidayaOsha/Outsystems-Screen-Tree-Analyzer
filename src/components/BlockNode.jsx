@@ -1,6 +1,15 @@
 import { useState } from 'react'
 import { getModuleColor } from '../lib/colorMap'
 
+function BlockIcon({ color = '#444' }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
+      <rect x="1" y="3" width="10" height="7.5" rx="1.4" stroke={color} strokeWidth="1.2" />
+      <rect x="3.5" y="0.6" width="5" height="3" rx="0.9" stroke={color} strokeWidth="1" />
+    </svg>
+  )
+}
+
 const s = {
   node: {
     position: 'relative',
@@ -111,6 +120,7 @@ export default function BlockNode({ block, ownerModule, depth = 0, blockResolver
           <span style={s.togglePlaceholder} />
         )}
 
+        <BlockIcon color={isCrossModule ? color.text : '#444'} />
         <span style={{ ...s.blockName, color: isCrossModule ? color.text : '#c0c0c0' }}>
           {block.name}
         </span>

@@ -1,6 +1,17 @@
 import { useState } from 'react'
 import BlockNode from './BlockNode'
 
+function ScreenIcon({ color = '#555' }) {
+  return (
+    <svg width="13" height="12" viewBox="0 0 13 12" fill="none" style={{ flexShrink: 0 }}>
+      <rect x="0.6" y="0.6" width="11.8" height="8.2" rx="1.4" stroke={color} strokeWidth="1.2" />
+      <line x1="0.6" y1="3.2" x2="12.4" y2="3.2" stroke={color} strokeWidth="1" />
+      <rect x="4.5" y="9.7" width="4" height="1.5" rx="0.5" fill={color} />
+      <line x1="6.5" y1="8.8" x2="6.5" y2="9.7" stroke={color} strokeWidth="1" />
+    </svg>
+  )
+}
+
 function shouldFilter(blockResolver) {
   return Object.values(blockResolver).some(defs => Object.keys(defs).length > 0)
 }
@@ -98,6 +109,7 @@ export default function ScreenCard({ screen, moduleName, blockResolver = {} }) {
         onClick={() => setExpanded(e => !e)}
       >
         <span style={s.toggle}>{expanded ? '▾' : '▸'}</span>
+        <ScreenIcon color="#555" />
         <span style={s.screenName}>{screen.name}</span>
         <span style={s.flowName}>{screen.flow}</span>
         <div style={s.meta}>
