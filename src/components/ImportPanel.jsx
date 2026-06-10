@@ -1,7 +1,9 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { parseOapZip } from '../lib/parseOapZip'
 import { parseOmlXml } from '../lib/parseOmlXml'
 import { demoModules } from '../data/demoModules'
+
+const SERVER_URL = 'http://localhost:7891'
 
 const CONVERT_PS1 = `# convert.ps1 — OS Screen Explorer OAP converter
 # Usage: .\\convert.ps1 -OapPath "C:\\exports\\SCMS.oap" -OutDir ".\\xml-output"
@@ -191,15 +193,88 @@ const s = {
     color: '#444',
     lineHeight: 1.6,
   },
+  serverBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    borderRadius: '4px',
+    marginBottom: '14px',
+    fontSize: '12px',
+    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+    border: '1px solid',
+  },
+  serverDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    flexShrink: 0,
+  },
+  recheckBtn: {
+    marginLeft: 'auto',
+    padding: '2px 8px',
+    background: 'transparent',
+    border: '1px solid #2a2a2a',
+    borderRadius: '3px',
+    color: '#555',
+    fontSize: '11px',
+    cursor: 'pointer',
+    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  },
+  progressBox: {
+    marginTop: '14px',
+    background: '#0a0a0a',
+    border: '1px solid #1e1e1e',
+    borderRadius: '4px',
+    overflow: 'hidden',
+  },
+  progressHeader: {
+    padding: '10px 12px',
+    borderBottom: '1px solid #1a1a1a',
+    fontSize: '12px',
+    color: '#888',
+    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  },
+  progressBar: {
+    height: '2px',
+    background: '#1a1a1a',
+  },
+  progressFill: {
+    height: '100%',
+    background: '#4ecfa0',
+    transition: 'width 0.3s',
+  },
+  progressList: {
+    maxHeight: '200px',
+    overflowY: 'auto',
+    padding: '6px 0',
+  },
+  progressItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '4px 12px',
+    fontSize: '12px',
+    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  },
+  sectionLabel: {
+    fontSize: '11px',
+    color: '#444',
+    marginTop: '14px',
+    marginBottom: '6px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+  },
 }
 
-function DropZone({ accept, onFiles, label, sublabel }) {
+function DropZone({ accept, onFiles, label, sublabel, disabled }) {
   const [over, setOver] = useState(false)
   const inputRef = useRef()
 
   const handleDrop = e => {
     e.preventDefault()
     setOver(false)
+    if (disabled) return
     const files = Array.from(e.dataTransfer.files).filter(f =>
       accept.some(ext => f.name.endsWith(ext))
     )
@@ -208,11 +283,15 @@ function DropZone({ accept, onFiles, label, sublabel }) {
 
   return (
     <div
-      style={{ ...s.dropZone, ...(over ? s.dropZoneOver : {}) }}
+      style={{
+        ...s.dropZone,
+        ...(over && !disabled ? s.dropZoneOver : {}),
+        ...(disabled ? { opacity: 0.4, cursor: 'default', pointerEvents: 'none' } : {}),
+      }}
       onDragOver={e => { e.preventDefault(); setOver(true) }}
       onDragLeave={() => setOver(false)}
       onDrop={handleDrop}
-      onClick={() => inputRef.current.click()}
+      onClick={() => !disabled && inputRef.current.click()}
     >
       <div style={s.dropLabel}>{label}</div>
       <div style={s.dropSub}>{sublabel}</div>
@@ -228,19 +307,149 @@ function DropZone({ accept, onFiles, label, sublabel }) {
   )
 }
 
+function ServerStatusBar({ status, onRecheck }) {
+  const config = {
+    checking: { dot: '#555', border: '#1e1e1e', bg: '#0d0d0d', text: 'checking conversion server…' },
+    connected: { dot: '#4ecfa0', border: '#0F6E56', bg: '#0d1a12', text: 'conversion server: ready' },
+    offline:   { dot: '#555',    border: '#1e1e1e', bg: '#0d0d0d', text: 'conversion server: not running' },
+  }
+  const c = config[status] || config.offline
+
+  return (
+    <div style={{ ...s.serverBar, background: c.bg, borderColor: c.border }}>
+      <span style={{ ...s.serverDot, background: c.dot }} />
+      <span style={{ color: status === 'connected' ? '#4ecfa0' : '#555' }}>{c.text}</span>
+      {status !== 'checking' && (
+        <button style={s.recheckBtn} onClick={onRecheck}>recheck</button>
+      )}
+    </div>
+  )
+}
+
+function ConversionProgress({ progress }) {
+  const { status, done, total, results } = progress
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+  const label = status === 'unzipping'
+    ? 'Reading OAP…'
+    : status === 'done'
+      ? `Done — ${results.filter(r => r.status === 'ok').length} of ${total} module(s) loaded`
+      : `Converting… (${done}/${total})`
+
+  return (
+    <div style={s.progressBox}>
+      <div style={s.progressHeader}>{label}</div>
+      <div style={s.progressBar}>
+        <div style={{ ...s.progressFill, width: `${pct}%` }} />
+      </div>
+      <div style={s.progressList}>
+        {results.map((r, i) => (
+          <div key={i} style={s.progressItem}>
+            <span style={{
+              color: r.status === 'ok' ? '#4ecfa0' : r.status === 'error' ? '#e87070' : '#555',
+              width: '14px', flexShrink: 0,
+            }}>
+              {r.status === 'ok' ? '✓' : r.status === 'error' ? '✗' : '…'}
+            </span>
+            <span style={{ color: r.status === 'converting' ? '#888' : r.status === 'ok' ? '#c0c0c0' : '#e87070' }}>
+              {r.name}
+            </span>
+            {r.status === 'error' && (
+              <span style={{ color: '#664444', fontSize: '11px', marginLeft: 'auto', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.error}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function ImportPanel({ onModulesLoaded }) {
   const [activeTab, setActiveTab] = useState(0)
+  const [serverStatus, setServerStatus] = useState('offline')
   const [oapResult, setOapResult] = useState(null)
+  const [converting, setConverting] = useState(null)
   const [errors, setErrors] = useState([])
+
+  const checkServer = () => {
+    setServerStatus('checking')
+    fetch(`${SERVER_URL}/health`, { signal: AbortSignal.timeout(2500) })
+      .then(r => r.ok ? setServerStatus('connected') : setServerStatus('offline'))
+      .catch(() => setServerStatus('offline'))
+  }
+
+  useEffect(() => {
+    if (activeTab === 0) checkServer()
+  }, [activeTab])
+
+  const convertOapWithServer = async file => {
+    setConverting({ status: 'unzipping', done: 0, total: 0, results: [] })
+    setOapResult(null)
+    setErrors([])
+
+    let omlFiles
+    try {
+      const buf = await file.arrayBuffer()
+      const result = await parseOapZip(buf, true)
+      omlFiles = result.omlFiles
+    } catch (e) {
+      setErrors([`Failed to read OAP: ${e.message}`])
+      setConverting(null)
+      return
+    }
+
+    setConverting({ status: 'converting', done: 0, total: omlFiles.length, results: [] })
+
+    const modules = []
+    const results = []
+
+    for (const oml of omlFiles) {
+      const moduleName = oml.name.replace(/\.oml$/i, '')
+      results.push({ name: moduleName, status: 'converting' })
+      setConverting(p => ({ ...p, results: [...results] }))
+
+      try {
+        const res = await fetch(
+          `${SERVER_URL}/convert?name=${encodeURIComponent(moduleName)}`,
+          {
+            method: 'POST',
+            body: oml.bytes,
+            headers: { 'Content-Type': 'application/octet-stream' },
+          }
+        )
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+          throw new Error(err.error || `HTTP ${res.status}`)
+        }
+        const xml = await res.text()
+        const mod = parseOmlXml(xml, oml.name)
+        modules.push(mod)
+        results[results.length - 1] = { name: moduleName, status: 'ok' }
+      } catch (e) {
+        results[results.length - 1] = { name: moduleName, status: 'error', error: e.message }
+      }
+
+      setConverting(p => ({ ...p, done: p.done + 1, results: [...results] }))
+    }
+
+    setConverting(p => ({ ...p, status: 'done' }))
+    if (modules.length > 0) onModulesLoaded(modules)
+  }
 
   const handleOapDrop = async files => {
     setErrors([])
-    try {
-      const buf = await files[0].arrayBuffer()
-      const result = await parseOapZip(buf)
-      setOapResult({ appName: files[0].name, ...result })
-    } catch (e) {
-      setErrors([e.message])
+    if (serverStatus === 'connected') {
+      await convertOapWithServer(files[0])
+    } else {
+      try {
+        const buf = await files[0].arrayBuffer()
+        const result = await parseOapZip(buf)
+        setOapResult({ appName: files[0].name, ...result })
+        setConverting(null)
+      } catch (e) {
+        setErrors([e.message])
+      }
     }
   }
 
@@ -268,7 +477,6 @@ export default function ImportPanel({ onModulesLoaded }) {
         if (Array.isArray(json)) {
           modules.push(...json)
         } else if (json.modules) {
-          // modules_index.json — just metadata, actual data in XML files
           errs.push(`${f.name}: modules_index.json loaded — also drop the accompanying .xml files`)
         }
       } catch (e) {
@@ -278,10 +486,6 @@ export default function ImportPanel({ onModulesLoaded }) {
 
     setErrors(errs)
     if (modules.length > 0) onModulesLoaded(modules)
-  }
-
-  const handleDemoLoad = () => {
-    onModulesLoaded(demoModules)
   }
 
   const downloadConvertScript = () => {
@@ -313,34 +517,56 @@ export default function ImportPanel({ onModulesLoaded }) {
       <div style={s.body}>
         {activeTab === 0 && (
           <div>
-            <DropZone
-              accept={['.oap']}
-              onFiles={handleOapDrop}
-              label="Drop .oap file here"
-              sublabel="OutSystems Application Package"
-            />
-            {oapResult && (
-              <div>
-                <div style={s.omlList}>
-                  <div style={{ marginBottom: '6px', color: '#888' }}>
-                    Found {oapResult.omlFiles.length} .oml file{oapResult.omlFiles.length !== 1 ? 's' : ''} in{' '}
-                    <span style={{ color: '#4ecfa0' }}>{oapResult.appName}</span>:
-                  </div>
-                  {oapResult.omlFiles.map(f => (
-                    <div key={f.name} style={s.omlItem}>
-                      <span style={{ color: '#333' }}>▸</span>
-                      <span>{f.name}</span>
+            <ServerStatusBar status={serverStatus} onRecheck={checkServer} />
+
+            {serverStatus === 'connected' ? (
+              <>
+                <DropZone
+                  accept={['.oap']}
+                  onFiles={handleOapDrop}
+                  disabled={converting && converting.status !== 'done'}
+                  label="Drop .oap file here"
+                  sublabel="Modules will be converted and loaded automatically"
+                />
+                {converting && <ConversionProgress progress={converting} />}
+              </>
+            ) : (
+              <>
+                <DropZone
+                  accept={['.oap']}
+                  onFiles={handleOapDrop}
+                  label="Drop .oap file here"
+                  sublabel="OutSystems Application Package"
+                />
+                <div style={s.sectionLabel}>Start the conversion server to convert automatically</div>
+                <div style={s.codeBlock}>{`# In a terminal — run once, then recheck above\nnode scripts/server.mjs --oml "C:\\path\\to\\oml.dll"\n\n# If oml-utilities is on PATH:\nnode scripts/server.mjs`}</div>
+
+                {oapResult && (
+                  <div>
+                    <div style={s.omlList}>
+                      <div style={{ marginBottom: '6px', color: '#888', marginTop: '14px' }}>
+                        Found {oapResult.omlFiles.length} .oml file{oapResult.omlFiles.length !== 1 ? 's' : ''} in{' '}
+                        <span style={{ color: '#4ecfa0' }}>{oapResult.appName}</span>:
+                      </div>
+                      {oapResult.omlFiles.map(f => (
+                        <div key={f.name} style={s.omlItem}>
+                          <span style={{ color: '#333' }}>▸</span>
+                          <span>{f.name}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <div style={s.codeBlock}>
-                  {`# Run this in PowerShell after downloading convert.ps1\n.\\convert.ps1 -OapPath "${oapResult.appName}" -OutDir ".\\xml-output"\n\n# Then drag the .xml files from xml-output/ into the "Drop XML / JSON" tab`}
-                </div>
-                <button style={s.dlBtn} onClick={downloadConvertScript}>
-                  ↓ Download convert.ps1
-                </button>
-              </div>
+                    <div style={s.sectionLabel}>Or convert manually with PowerShell</div>
+                    <div style={s.codeBlock}>
+                      {`.\\convert.ps1 -OapPath "${oapResult.appName}" -OutDir ".\\xml-output"\n\n# Then drag the .xml files from xml-output/ into the "Drop XML / JSON" tab`}
+                    </div>
+                    <button style={s.dlBtn} onClick={downloadConvertScript}>
+                      ↓ Download convert.ps1
+                    </button>
+                  </div>
+                )}
+              </>
             )}
+
             {errors.map((e, i) => <div key={i} style={s.errorMsg}>{e}</div>)}
           </div>
         )}
@@ -359,7 +585,7 @@ export default function ImportPanel({ onModulesLoaded }) {
 
         {activeTab === 2 && (
           <div>
-            <button style={s.demoBtn} onClick={handleDemoLoad}>
+            <button style={s.demoBtn} onClick={() => onModulesLoaded(demoModules)}>
               Load WerkDone / SCMS Demo Data
             </button>
             <div style={s.demoDesc}>
