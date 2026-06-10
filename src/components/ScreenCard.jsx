@@ -1,0 +1,121 @@
+import { useState } from 'react'
+import BlockNode from './BlockNode'
+
+function countCrossModule(blocks, ownerModule) {
+  let count = 0
+  for (const b of blocks) {
+    if (b.sourceModule !== ownerModule) count++
+    count += countCrossModule(b.blocks, b.sourceModule)
+  }
+  return count
+}
+
+const s = {
+  card: {
+    background: '#111111',
+    border: '1px solid #1e1e1e',
+    borderRadius: '4px',
+    marginBottom: '8px',
+    overflow: 'hidden',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '10px 14px',
+    cursor: 'pointer',
+    userSelect: 'none',
+    borderBottom: '1px solid transparent',
+  },
+  headerExpanded: {
+    borderBottomColor: '#1e1e1e',
+  },
+  toggle: {
+    color: '#444',
+    fontSize: '11px',
+    width: '14px',
+    flexShrink: 0,
+  },
+  screenName: {
+    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+    fontSize: '13px',
+    fontWeight: 600,
+    color: '#e0e0e0',
+  },
+  flowName: {
+    fontSize: '11px',
+    color: '#444',
+    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  },
+  meta: {
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexShrink: 0,
+  },
+  blockCount: {
+    fontSize: '11px',
+    color: '#555',
+  },
+  crossBadge: {
+    fontSize: '11px',
+    color: '#BA7517',
+    background: '#1e1508',
+    border: '1px solid #854F0B',
+    padding: '1px 6px',
+    borderRadius: '3px',
+  },
+  body: {
+    padding: '10px 14px',
+  },
+  empty: {
+    fontSize: '12px',
+    color: '#444',
+    fontStyle: 'italic',
+    padding: '4px 0',
+  },
+}
+
+export default function ScreenCard({ screen, moduleName }) {
+  const [expanded, setExpanded] = useState(false)
+  const crossCount = countCrossModule(screen.blocks, moduleName)
+
+  return (
+    <div style={s.card}>
+      <div
+        style={{ ...s.header, ...(expanded ? s.headerExpanded : {}) }}
+        onClick={() => setExpanded(e => !e)}
+      >
+        <span style={s.toggle}>{expanded ? '▾' : '▸'}</span>
+        <span style={s.screenName}>{screen.name}</span>
+        <span style={s.flowName}>{screen.flow}</span>
+        <div style={s.meta}>
+          {screen.blocks.length > 0 && (
+            <span style={s.blockCount}>{screen.blocks.length} block{screen.blocks.length !== 1 ? 's' : ''}</span>
+          )}
+          {crossCount > 0 && (
+            <span style={s.crossBadge}>⚠ {crossCount} cross-module</span>
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={s.body}>
+          {screen.blocks.length === 0 ? (
+            <div style={s.empty}>no blocks — raw content screen</div>
+          ) : (
+            screen.blocks.map((block, i) => (
+              <BlockNode
+                key={`${block.name}-${i}`}
+                block={block}
+                ownerModule={moduleName}
+                depth={0}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
