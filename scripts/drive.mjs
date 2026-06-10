@@ -72,8 +72,9 @@ try {
 
   // ── 4. Expand first screen card ─────────────────────────────────────────────
   console.log('[4] Expanding first screen card...')
-  const firstCard = page.locator('[style*="ScreenCard"], div').filter({ hasText: 'PatientDashboard' }).first()
-  await firstCard.click()
+  // Click the ▸ toggle in the first screen card header
+  const firstToggle = page.locator('span').filter({ hasText: '▸' }).first()
+  await firstToggle.click()
   await page.waitForTimeout(400)
   await shot('04-screen-expanded')
 
@@ -103,9 +104,10 @@ try {
 
   // ── 7. Expand a screen and check cross-module badges ────────────────────────
   console.log('[7] Expanding GantryEventLog screen...')
-  const gantryCard = page.locator('div').filter({ hasText: /GantryEventLog/ }).first()
-  if (await gantryCard.isVisible()) {
-    await gantryCard.click()
+  // Click the ▸ toggle next to GantryEventLog
+  const gantryToggle = page.locator('span').filter({ hasText: '▸' }).first()
+  if (await gantryToggle.isVisible()) {
+    await gantryToggle.click()
     await page.waitForTimeout(400)
     await shot('07-gantry-expanded')
   }

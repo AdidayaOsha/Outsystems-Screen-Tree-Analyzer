@@ -254,7 +254,7 @@ export default function ImportPanel({ onModulesLoaded }) {
     for (const f of xmlFiles) {
       try {
         const text = await f.text()
-        const mod = parseOmlXml(text)
+        const mod = parseOmlXml(text, f.name)
         modules.push(mod)
       } catch (e) {
         errs.push(`${f.name}: ${e.message}`)

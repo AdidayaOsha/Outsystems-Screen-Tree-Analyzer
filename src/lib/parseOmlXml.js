@@ -6,26 +6,218 @@ export function inferType(moduleName) {
   return 'End User'
 }
 
-function getTextContent(parent, tagName) {
-  const el = parent.querySelector(tagName)
-  return el ? el.textContent.trim() : null
+// ── Path parsing helpers ───────────────────────────────────────────────────────
+
+// "NRNodes.WebBlock:/NRWebFlows.ABC/NodesShownInESpaceTree.XYZ"
+//   → { type: 'local', flowKey: 'ABC', nodeKey: 'XYZ' }
+// "NewRuntime.ReferenceWebBlock:/References.ABC/ReferenceNRWebFlows.DEF/ReferenceWebBlocks.XYZ"
+//   → { type: 'ref', refKey: 'ABC', rbKey: 'XYZ' }
+function parseSourceWebBlock(src) {
+  if (!src) return null
+  const refMatch = src.match(/NewRuntime\.ReferenceWebBlock:\/References\.([^/]+)\/ReferenceNRWebFlows\.[^/]+\/ReferenceWebBlocks\.(.+)$/)
+  if (refMatch) return { type: 'ref', refKey: refMatch[1], rbKey: refMatch[2] }
+  const localMatch = src.match(/NRNodes\.WebBlock:\/NRWebFlows\.([^/]+)\/NodesShownInESpaceTree\.(.+)$/)
+  if (localMatch) return { type: 'local', flowKey: localMatch[1], nodeKey: localMatch[2] }
+  return null
 }
 
-function buildRefMap(doc) {
+// ── Fragment extraction ────────────────────────────────────────────────────────
+
+function getFragments(doc) {
+  const frags = {}
+  const all = doc.querySelectorAll('eSpaceFragment')
+  for (const f of all) {
+    const name = f.getAttribute('FragmentName')
+    if (name) frags[name] = f
+  }
+  return frags
+}
+
+// ── Map builders ──────────────────────────────────────────────────────────────
+
+function buildFlowMap(frags) {
+  // flowKey → flowName
+  const map = {}
+  const frag = frags['NRWebFlows']
+  if (!frag) return map
+  for (const el of frag.children) {
+    const key = el.getAttribute('Key')
+    const name = el.getAttribute('Name')
+    if (key && name) map[key] = name
+  }
+  return map
+}
+
+function buildLocalNodeMap(frags) {
+  // nodeKey → { name, type: 'Screen'|'Block', flowKey }
+  const map = {}
+  for (const [fragName, frag] of Object.entries(frags)) {
+    if (!fragName.startsWith('NodesShownInESpaceTree#')) continue
+    const flowKey = fragName.slice('NodesShownInESpaceTree#'.length)
+    for (const el of frag.children) {
+      const tag = el.tagName
+      if (tag !== 'NRNodes.WebScreen' && tag !== 'NRNodes.WebBlock') continue
+      const key = el.getAttribute('Key')
+      const name = el.getAttribute('Name')
+      if (key && name) map[key] = { name, type: tag === 'NRNodes.WebScreen' ? 'Screen' : 'Block', flowKey }
+    }
+  }
+  return map
+}
+
+function buildRefModuleMap(frags) {
+  // refKey → moduleName
+  const map = {}
+  const refFrag = frags['References']
+  if (!refFrag) return map
+  for (const ref of refFrag.children) {
+    const key = ref.getAttribute('Key')
+    const name = ref.getAttribute('Name')
+    if (key && name) map[key] = name
+  }
+  return map
+}
+
+function buildRefBlockMap(frags) {
+  // rbKey → blockName  (elements are NewRuntime.ReferenceWebBlock)
+  const map = {}
+  const refFrag = frags['References']
+  if (!refFrag) return map
+  for (const rwb of refFrag.getElementsByTagName('NewRuntime.ReferenceWebBlock')) {
+    const key = rwb.getAttribute('Key')
+    const name = rwb.getAttribute('Name') || rwb.getAttribute('OriginalName')
+    if (key && name) map[key] = name
+  }
+  return map
+}
+
+// ── Block extraction ──────────────────────────────────────────────────────────
+
+function extractBlockInstances(nodeKey, frags, localNodeMap, refModuleMap, refBlockMap, moduleName, visited = new Set()) {
+  if (visited.has(nodeKey)) return []
+  const widgetFrag = frags[`Widgets#${nodeKey}`]
+  if (!widgetFrag) return []
+
+  const results = []
+  const instances = widgetFrag.getElementsByTagName('NRWebWidgets.WebBlockInstance')
+
+  for (const inst of instances) {
+    const src = inst.getAttribute('SourceWebBlock')
+    const parsed = parseSourceWebBlock(src)
+    if (!parsed) continue
+
+    let blockName = null
+    let sourceModule = null
+
+    if (parsed.type === 'local') {
+      const node = localNodeMap[parsed.nodeKey]
+      blockName = node ? node.name : `[block:${parsed.nodeKey.slice(0, 8)}]`
+      sourceModule = moduleName
+    } else {
+      sourceModule = refModuleMap[parsed.refKey] || `[module:${parsed.refKey.slice(0, 8)}]`
+      blockName = refBlockMap[parsed.rbKey] || null
+      // If block name unknown, skip system UI components silently or show module-scoped fallback
+      if (!blockName) continue
+    }
+
+    // For local blocks, recurse into the block's own Widgets# fragment using its definition key.
+    // For cross-module blocks, the definition lives in another module's XML — no recursion possible.
+    const recurseKey = parsed.type === 'local' ? parsed.nodeKey : null
+    const childVisited = new Set(visited)
+    childVisited.add(nodeKey)
+    const nestedBlocks = recurseKey
+      ? extractBlockInstances(recurseKey, frags, localNodeMap, refModuleMap, refBlockMap, sourceModule, childVisited)
+      : []
+
+    results.push({ name: blockName, sourceModule, blocks: nestedBlocks })
+  }
+
+  return results
+}
+
+// ── Main parser ───────────────────────────────────────────────────────────────
+
+export function parseOmlXml(xmlString, fileName) {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(xmlString, 'application/xml')
+
+  const parseError = doc.querySelector('parsererror')
+  if (parseError) throw new Error('XML parse error: ' + parseError.textContent.slice(0, 200))
+
+  // Detect format: legacy eSpace-rooted vs oml-utilities fragment format
+  const eSpaceRoot = doc.querySelector('eSpace')
+  const omlRoot = doc.querySelector('OML')
+
+  if (!eSpaceRoot && !omlRoot) {
+    throw new Error('Unrecognised XML format — expected <OML> (oml-utilities output) or <eSpace> root.')
+  }
+
+  // Legacy format (original CLAUDE.md assumption)
+  if (eSpaceRoot && !omlRoot) {
+    return parseLegacyFormat(doc, eSpaceRoot)
+  }
+
+  // oml-utilities fragment format
+  const moduleName = fileName ? fileName.replace(/\.[^.]+$/, '') : 'UnknownModule'
+  return parseFragmentFormat(doc, moduleName)
+}
+
+// ── Legacy format (eSpace root) ───────────────────────────────────────────────
+
+function parseLegacyFormat(doc, eSpace) {
+  const moduleName = eSpace.getAttribute('name') || 'UnknownModule'
   const refMap = {}
-  const refs = doc.querySelectorAll('Reference')
-  for (const ref of refs) {
-    const kind = getTextContent(ref, 'ReferenceKind')
+  for (const ref of doc.querySelectorAll('Reference')) {
+    const kind = ref.querySelector('ReferenceKind')?.textContent?.trim()
     if (kind === 'Block' || kind === 'WebBlock') {
-      const name = getTextContent(ref, 'OriginalName')
-      const mod = getTextContent(ref, 'OriginalModuleName')
+      const name = ref.querySelector('OriginalName')?.textContent?.trim()
+      const mod = ref.querySelector('OriginalModuleName')?.textContent?.trim()
       if (name && mod) refMap[name] = mod
     }
   }
-  return refMap
+  const screenEls = doc.querySelectorAll('Screen, WebScreen')
+  const screens = []
+  for (const screenEl of screenEls) {
+    const name = screenEl.getAttribute('name')
+    if (!name) continue
+    let flow = 'MainFlow'
+    let parent = screenEl.parentElement
+    while (parent && parent !== eSpace) {
+      if (parent.tagName === 'UIFlow') { flow = parent.getAttribute('name') || 'MainFlow'; break }
+      parent = parent.parentElement
+    }
+    screens.push({ name, flow, blocks: extractLegacyBlocks(screenEl, moduleName, refMap) })
+  }
+  return { name: moduleName, type: inferType(moduleName), screens }
 }
 
-function isBlockWidget(el) {
+function extractLegacyBlocks(el, ownerModule, refMap, visited = new Set()) {
+  const results = []
+  for (const child of el.children) {
+    if (isLegacyBlockWidget(child)) {
+      let blockName = null, sourceModule = null
+      if (child.tagName === 'BlockWidget') {
+        blockName = child.getAttribute('BlockName')
+        sourceModule = child.getAttribute('ModuleName')
+      } else {
+        const props = child.querySelector('WebBlockWidgetProperties')
+        if (props) { blockName = props.querySelector('BlockName')?.textContent?.trim(); sourceModule = props.querySelector('SourceModule')?.textContent?.trim() }
+        else { blockName = child.querySelector('BlockName')?.textContent?.trim() || child.getAttribute('Name'); sourceModule = child.querySelector('ModuleName')?.textContent?.trim() }
+      }
+      if (!blockName) continue
+      sourceModule = sourceModule || refMap[blockName] || ownerModule
+      const key = `${blockName}@${sourceModule}`
+      if (visited.has(key)) continue
+      const nv = new Set(visited); nv.add(key)
+      results.push({ name: blockName, sourceModule, blocks: extractLegacyBlocks(child, sourceModule, refMap, nv) })
+    } else {
+      results.push(...extractLegacyBlocks(child, ownerModule, refMap, visited))
+    }
+  }
+  return results
+}
+
+function isLegacyBlockWidget(el) {
   const tag = el.tagName
   if (tag === 'BlockWidget') return true
   if (tag === 'Widget') {
@@ -33,101 +225,40 @@ function isBlockWidget(el) {
     const xsiType = el.getAttribute('xsi:type') || el.getAttributeNS('http://www.w3.org/2001/XMLSchema-instance', 'type')
     if (kind === 'Block' || kind === 'WebBlock') return true
     if (xsiType && (xsiType.includes('BlockWidget') || xsiType.includes('WebBlockWidget'))) return true
-    // Pattern 4: Widget with WebBlockWidgetProperties child
     if (el.querySelector('WebBlockWidgetProperties')) return true
   }
   return false
 }
 
-function extractBlocksFromElement(el, ownerModule, refMap, visited = new Set()) {
-  const results = []
-  const children = Array.from(el.children)
+// ── Fragment format (oml-utilities output) ────────────────────────────────────
 
-  for (const child of children) {
-    if (isBlockWidget(child)) {
-      let blockName = null
-      let sourceModule = null
+function parseFragmentFormat(doc, moduleName) {
+  const frags = getFragments(doc)
+  const flowMap = buildFlowMap(frags)
+  const localNodeMap = buildLocalNodeMap(frags)
+  const refModuleMap = buildRefModuleMap(frags)
+  const refBlockMap = buildRefBlockMap(frags)
 
-      if (child.tagName === 'BlockWidget') {
-        blockName = child.getAttribute('BlockName')
-        sourceModule = child.getAttribute('ModuleName')
-      } else {
-        // Widget element — try all patterns
-        const props = child.querySelector('WebBlockWidgetProperties')
-        if (props) {
-          blockName = getTextContent(props, 'BlockName')
-          sourceModule = getTextContent(props, 'SourceModule')
-        } else {
-          blockName = getTextContent(child, 'BlockName') || child.getAttribute('Name')
-          sourceModule = getTextContent(child, 'ModuleName')
-        }
-      }
-
-      if (!blockName) continue
-
-      sourceModule = sourceModule || refMap[blockName] || ownerModule
-
-      // Guard against infinite recursion (shouldn't happen in OutSystems)
-      const nodeKey = `${blockName}@${sourceModule}`
-      if (visited.has(nodeKey)) continue
-      const nextVisited = new Set(visited)
-      nextVisited.add(nodeKey)
-
-      const nestedBlocks = extractBlocksFromElement(child, sourceModule, refMap, nextVisited)
-      results.push({ name: blockName, sourceModule, blocks: nestedBlocks })
-    } else {
-      // Recurse into non-block container children
-      const nested = extractBlocksFromElement(child, ownerModule, refMap, visited)
-      results.push(...nested)
-    }
-  }
-
-  return results
-}
-
-export function parseOmlXml(xmlString) {
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(xmlString, 'text/xml')
-
-  const parseError = doc.querySelector('parsererror')
-  if (parseError) {
-    throw new Error('XML parse error: ' + parseError.textContent.slice(0, 200))
-  }
-
-  const eSpace = doc.querySelector('eSpace')
-  if (!eSpace) {
-    throw new Error('No <eSpace> root element found — is this an oml-utilities XML output?')
-  }
-
-  const moduleName = eSpace.getAttribute('name') || 'UnknownModule'
-  const refMap = buildRefMap(doc)
-
-  // Find all screens — both Reactive (Screen) and Traditional Web (WebScreen)
-  const screenEls = Array.from(doc.querySelectorAll('Screen, WebScreen'))
   const screens = []
+  const PREFIX = 'NodesShownInESpaceTree#'
 
-  for (const screenEl of screenEls) {
-    const name = screenEl.getAttribute('name')
-    if (!name) continue
+  // Iterate ALL NodesShownInESpaceTree fragments — not just those whose key is
+  // in NRWebFlows, because some flows (e.g. system/auth flows) are missing there.
+  for (const [fragName, nodesFrag] of Object.entries(frags)) {
+    if (!fragName.startsWith(PREFIX)) continue
+    const flowKey = fragName.slice(PREFIX.length)
+    const flowName = flowMap[flowKey] || 'MainFlow'
 
-    // Walk up to find UIFlow name
-    let flow = 'MainFlow'
-    let parent = screenEl.parentElement
-    while (parent && parent !== eSpace) {
-      if (parent.tagName === 'UIFlow') {
-        flow = parent.getAttribute('name') || 'MainFlow'
-        break
-      }
-      parent = parent.parentElement
+    for (const el of nodesFrag.children) {
+      if (el.tagName !== 'NRNodes.WebScreen') continue
+      const screenKey = el.getAttribute('Key')
+      const screenName = el.getAttribute('Name')
+      if (!screenKey || !screenName) continue
+
+      const blocks = extractBlockInstances(screenKey, frags, localNodeMap, refModuleMap, refBlockMap, moduleName)
+      screens.push({ name: screenName, flow: flowName, blocks })
     }
-
-    const blocks = extractBlocksFromElement(screenEl, moduleName, refMap)
-    screens.push({ name, flow, blocks })
   }
 
-  return {
-    name: moduleName,
-    type: inferType(moduleName),
-    screens,
-  }
+  return { name: moduleName, type: inferType(moduleName), screens }
 }

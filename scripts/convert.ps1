@@ -100,7 +100,11 @@ foreach ($oap in $oaps) {
         Write-Host "  Converting $modName..." -NoNewline
 
         try {
-            & $omlCmd manipulate $omlFile.FullName $outXml 2>&1 | Out-Null
+            if ($omlCmd -match '\.dll$') {
+                dotnet $omlCmd manipulate $omlFile.FullName $outXml 2>&1 | Out-Null
+            } else {
+                & $omlCmd manipulate $omlFile.FullName $outXml 2>&1 | Out-Null
+            }
             if ($LASTEXITCODE -eq 0) {
                 $type = if ($modName -match "_Web$") { "End User" }
                         elseif ($modName -match "_Lib$") { "Foundation" }
