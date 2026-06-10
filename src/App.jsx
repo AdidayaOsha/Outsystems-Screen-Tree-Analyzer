@@ -335,7 +335,7 @@ export default function App() {
                       <span style={{ marginLeft: '4px', color: '#333', fontSize: '10px' }}>
                         {mod.screens.length}
                       </span>
-                      <button
+                      <span
                         style={s.moduleTabRemove}
                         onClick={e => removeModule(e, i)}
                         title="Remove module"
@@ -343,7 +343,7 @@ export default function App() {
                         onMouseLeave={e => (e.target.style.color = '#333')}
                       >
                         ×
-                      </button>
+                      </span>
                     </button>
                   )
                 })}
