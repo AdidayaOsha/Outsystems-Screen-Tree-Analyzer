@@ -4,6 +4,7 @@ import ImportPanel from './components/ImportPanel'
 import ScreenCard from './components/ScreenCard'
 import ModuleLegend from './components/ModuleLegend'
 import SearchPanel from './components/SearchPanel'
+import GraphView from './components/GraphView'
 
 const LS_KEY = 'os-screen-explorer:modules'
 
@@ -180,6 +181,29 @@ const s = {
     fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
     marginLeft: 'auto',
   },
+  viewToggleGroup: {
+    display: 'flex',
+    gap: '2px',
+    background: '#0d0d0d',
+    border: '1px solid #1e1e1e',
+    borderRadius: '5px',
+    padding: '2px',
+  },
+  viewToggleBtn: {
+    padding: '4px 10px',
+    background: 'none',
+    border: 'none',
+    borderRadius: '3px',
+    fontSize: '11px',
+    cursor: 'pointer',
+    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+    color: '#444',
+    transition: 'background 0.1s, color 0.1s',
+  },
+  viewToggleBtnActive: {
+    background: '#1a1a1a',
+    color: '#4ecfa0',
+  },
   importOverlay: {
     padding: '16px 20px',
     borderBottom: '1px solid #1e1e1e',
@@ -194,6 +218,7 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [showImport, setShowImport] = useState(true)
   const [storedModules, setStoredModules] = useState(null)
+  const [viewMode, setViewMode] = useState('tree') // 'tree' | 'graph'
 
   // Check localStorage on mount
   useEffect(() => {
@@ -281,9 +306,22 @@ export default function App() {
         <div style={s.headerDot} />
         <span style={s.headerTitle}>OS Screen Explorer</span>
         {modules.length > 0 && (
-          <button style={s.importToggle} onClick={() => setShowImport(v => !v)}>
-            {showImport ? '× close import' : '+ import'}
-          </button>
+          <>
+            <div style={s.viewToggleGroup}>
+              {['tree', 'graph'].map(mode => (
+                <button
+                  key={mode}
+                  style={{ ...s.viewToggleBtn, ...(viewMode === mode ? s.viewToggleBtnActive : {}) }}
+                  onClick={() => setViewMode(mode)}
+                >
+                  {mode === 'tree' ? '⊟ tree' : '◎ graph'}
+                </button>
+              ))}
+            </div>
+            <button style={s.importToggle} onClick={() => setShowImport(v => !v)}>
+              {showImport ? '× close import' : '+ import'}
+            </button>
+          </>
         )}
         <span style={s.headerSub}>O11 · Reactive Web · Block Tree Analyzer</span>
       </header>
@@ -349,23 +387,28 @@ export default function App() {
                 })}
               </div>
 
-              <div style={s.screenList}>
-                {activeModule && Object.entries(groupedScreens).map(([flow, screens]) => (
-                  <div key={flow} style={s.flowGroup}>
-                    <div style={s.flowLabel}>{flow}</div>
-                    {screens.map((screen, i) => (
-                      <ScreenCard
-                        key={`${screen.name}-${i}`}
-                        screen={screen}
-                        moduleName={activeModule.name}
-                        blockResolver={blockResolver}
-                      />
+              {viewMode === 'graph' ? (
+                <GraphView modules={modules} blockResolver={blockResolver} />
+              ) : (
+                <>
+                  <div style={s.screenList}>
+                    {activeModule && Object.entries(groupedScreens).map(([flow, screens]) => (
+                      <div key={flow} style={s.flowGroup}>
+                        <div style={s.flowLabel}>{flow}</div>
+                        {screens.map((screen, i) => (
+                          <ScreenCard
+                            key={`${screen.name}-${i}`}
+                            screen={screen}
+                            moduleName={activeModule.name}
+                            blockResolver={blockResolver}
+                          />
+                        ))}
+                      </div>
                     ))}
                   </div>
-                ))}
-              </div>
-
-              <ModuleLegend modules={modules} />
+                  <ModuleLegend modules={modules} />
+                </>
+              )}
             </>
           )}
 
