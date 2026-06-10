@@ -3,38 +3,53 @@
 #
 # Prerequisites:
 #   - .NET 6+ installed  (https://dotnet.microsoft.com/download)
-#   - OmlUtilities tool: dotnet tool install --global OmlUtilities
+#   - oml-utilities built from source: https://github.com/silviogarbes/oml-utilities
+#     git clone https://github.com/silviogarbes/oml-utilities.git
+#     cd oml-utilities && dotnet build OmlUtilities.sln -c Release
 #
-# Usage:
+# Usage (oml.exe on PATH):
 #   .\convert.ps1 -OapPath "C:\exports\SCMS.oap" -OutDir ".\xml-output"
 #   .\convert.ps1 -OapDir  "C:\exports"           -OutDir ".\xml-output"
+#
+# Usage (direct path to exe):
+#   .\convert.ps1 -OapPath "SCMS.oap" -OmlExe "C:\oml-utilities\OmlUtilities\bin\Release\net6.0\OmlUtilities.exe"
 
 param(
     [string]$OapPath,
     [string]$OapDir,
-    [string]$OutDir = ".\xml-output"
+    [string]$OutDir  = ".\xml-output",
+    [string]$OmlExe  = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# ── Check oml-utilities ────────────────────────────────────────────────────────
-if (-not (Get-Command "oml" -ErrorAction SilentlyContinue)) {
-    Write-Host "oml-utilities not found. Attempting to install via dotnet tool..." -ForegroundColor Yellow
-    dotnet tool install --global OmlUtilities
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host ""
-        Write-Error @"
-Failed to install OmlUtilities.
-  1. Ensure .NET 6 or later is installed: https://dotnet.microsoft.com/download
-  2. Then run: dotnet tool install --global OmlUtilities
-  3. Re-run this script.
-
-OmlUtilities version support: https://github.com/silviogarbes/oml-utilities
-"@
+# ── Resolve oml command ────────────────────────────────────────────────────────
+$omlCmd = $null
+if ($OmlExe) {
+    if (-not (Test-Path $OmlExe)) {
+        Write-Error "OmlExe not found: $OmlExe"
         exit 1
     }
-    Write-Host "OmlUtilities installed successfully." -ForegroundColor Green
+    $omlCmd = $OmlExe
+    Write-Host "Using oml-utilities: $omlCmd" -ForegroundColor DarkGray
+} elseif (Get-Command "OmlUtilities" -ErrorAction SilentlyContinue) {
+    $omlCmd = "OmlUtilities"
+} elseif (Get-Command "oml" -ErrorAction SilentlyContinue) {
+    $omlCmd = "oml"
+} else {
+    Write-Host ""
+    Write-Host "oml-utilities not found." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "oml-utilities is not on NuGet — you need to build it from source:" -ForegroundColor Yellow
+    Write-Host "  1. git clone https://github.com/silviogarbes/oml-utilities.git"
+    Write-Host "  2. cd oml-utilities"
+    Write-Host "  3. dotnet build OmlUtilities.sln -c Release"
+    Write-Host "  4. Re-run this script with -OmlExe pointing to the built exe:"
+    Write-Host '     .\convert.ps1 -OapPath "..." -OmlExe ".\oml-utilities\OmlUtilities\bin\Release\net6.0\OmlUtilities.exe"' -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Repo: https://github.com/silviogarbes/oml-utilities" -ForegroundColor DarkGray
+    exit 1
 }
 
 # ── Resolve .oap files ─────────────────────────────────────────────────────────
@@ -85,7 +100,7 @@ foreach ($oap in $oaps) {
         Write-Host "  Converting $modName..." -NoNewline
 
         try {
-            oml manipulate $omlFile.FullName $outXml 2>&1 | Out-Null
+            & $omlCmd manipulate $omlFile.FullName $outXml 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 $type = if ($modName -match "_Web$") { "End User" }
                         elseif ($modName -match "_Lib$") { "Foundation" }
