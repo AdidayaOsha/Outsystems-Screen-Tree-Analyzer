@@ -20,7 +20,7 @@ const root = resolve(__dir, '..')
 const VITE_PORT = 5210
 const SERVER_PORT = 7891
 const OML_EXE = 'C:\\Projects\\oml-utilities\\OmlUtilities\\bin\\Release\\net8.0\\oml.dll'
-const OAP_PATH = 'C:\\Users\\USER\\Downloads\\SparkleCare.oap'
+const OAP_PATH = 'C:\\Users\\USER\\Downloads\\Sparkle Care.oap'
 
 function startProcess(cmd, args, label) {
   return new Promise((resolve, reject) => {
