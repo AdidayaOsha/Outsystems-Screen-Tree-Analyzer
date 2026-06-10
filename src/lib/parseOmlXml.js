@@ -260,5 +260,13 @@ function parseFragmentFormat(doc, moduleName) {
     }
   }
 
-  return { name: moduleName, type: inferType(moduleName), screens }
+  // Build blockDefs: map of blockName → its direct block children.
+  // Used by the app to resolve cross-module nesting when multiple modules are loaded.
+  const blockDefs = {}
+  for (const [nodeKey, info] of Object.entries(localNodeMap)) {
+    if (info.type !== 'Block') continue
+    blockDefs[info.name] = extractBlockInstances(nodeKey, frags, localNodeMap, refModuleMap, refBlockMap, moduleName)
+  }
+
+  return { name: moduleName, type: inferType(moduleName), screens, blockDefs }
 }

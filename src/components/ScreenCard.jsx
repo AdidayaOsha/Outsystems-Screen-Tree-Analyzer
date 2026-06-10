@@ -1,11 +1,21 @@
 import { useState } from 'react'
 import BlockNode from './BlockNode'
 
-function countCrossModule(blocks, ownerModule) {
+function shouldFilter(blockResolver) {
+  return Object.values(blockResolver).some(defs => Object.keys(defs).length > 0)
+}
+
+function countCrossModule(blocks, ownerModule, blockResolver) {
+  const filter = shouldFilter(blockResolver)
+  const loadedModules = Object.keys(blockResolver)
+  const visible = (!filter)
+    ? blocks
+    : blocks.filter(b => b.sourceModule === ownerModule || loadedModules.includes(b.sourceModule))
   let count = 0
-  for (const b of blocks) {
+  for (const b of visible) {
+    const children = (blockResolver[b.sourceModule]?.[b.name]) ?? b.blocks
     if (b.sourceModule !== ownerModule) count++
-    count += countCrossModule(b.blocks, b.sourceModule)
+    count += countCrossModule(children, b.sourceModule, blockResolver)
   }
   return count
 }
@@ -77,9 +87,9 @@ const s = {
   },
 }
 
-export default function ScreenCard({ screen, moduleName }) {
+export default function ScreenCard({ screen, moduleName, blockResolver = {} }) {
   const [expanded, setExpanded] = useState(false)
-  const crossCount = countCrossModule(screen.blocks, moduleName)
+  const crossCount = countCrossModule(screen.blocks, moduleName, blockResolver)
 
   return (
     <div style={s.card}>
@@ -111,6 +121,7 @@ export default function ScreenCard({ screen, moduleName }) {
                 block={block}
                 ownerModule={moduleName}
                 depth={0}
+                blockResolver={blockResolver}
               />
             ))
           )}

@@ -34,12 +34,6 @@ const s = {
     width: '16px',
     flexShrink: 0,
   },
-  leftBar: {
-    width: '2px',
-    alignSelf: 'stretch',
-    flexShrink: 0,
-    borderRadius: '1px',
-  },
   blockName: {
     fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
     fontSize: '12px',
@@ -66,9 +60,32 @@ const s = {
   },
 }
 
-export default function BlockNode({ block, ownerModule, depth = 0 }) {
+// Filter only applies when at least one loaded module has real blockDefs (parsed from XML).
+// Demo data has no blockDefs, so filtering is skipped there entirely.
+function shouldFilter(blockResolver) {
+  return Object.values(blockResolver).some(defs => Object.keys(defs).length > 0)
+}
+
+function visibleBlocks(blocks, ownerModule, blockResolver) {
+  if (!shouldFilter(blockResolver)) return blocks
+  const loadedModules = Object.keys(blockResolver)
+  return blocks.filter(b =>
+    b.sourceModule === ownerModule || loadedModules.includes(b.sourceModule)
+  )
+}
+
+// Resolve a block's children: use the source module's blockDef if available,
+// otherwise fall back to whatever was stored at parse time (pre-populated in demo data).
+function resolveChildren(block, blockResolver) {
+  const defs = blockResolver[block.sourceModule]
+  if (defs && defs[block.name] !== undefined) return defs[block.name]
+  return block.blocks
+}
+
+export default function BlockNode({ block, ownerModule, depth = 0, blockResolver = {} }) {
+  const children = visibleBlocks(resolveChildren(block, blockResolver), block.sourceModule, blockResolver)
   const [expanded, setExpanded] = useState(depth < 2)
-  const hasChildren = block.blocks && block.blocks.length > 0
+  const hasChildren = children.length > 0
   const isCrossModule = block.sourceModule !== ownerModule
   const color = getModuleColor(block.sourceModule)
 
@@ -112,18 +129,19 @@ export default function BlockNode({ block, ownerModule, depth = 0 }) {
         )}
 
         {hasChildren && !expanded && (
-          <span style={s.childCount}>{block.blocks.length} child{block.blocks.length !== 1 ? 'ren' : ''}</span>
+          <span style={s.childCount}>{children.length} child{children.length !== 1 ? 'ren' : ''}</span>
         )}
       </div>
 
       {hasChildren && expanded && (
         <div style={{ ...s.children, borderColor: color.border + '50' }}>
-          {block.blocks.map((child, i) => (
+          {children.map((child, i) => (
             <BlockNode
               key={`${child.name}-${i}`}
               block={child}
               ownerModule={block.sourceModule}
               depth={depth + 1}
+              blockResolver={blockResolver}
             />
           ))}
         </div>

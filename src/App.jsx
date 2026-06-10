@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getModuleColor } from './lib/colorMap'
 import ImportPanel from './components/ImportPanel'
 import ScreenCard from './components/ScreenCard'
@@ -253,6 +253,18 @@ export default function App() {
     setShowImport(false)
   }
 
+  // Build a resolver: moduleName → { blockName → blocks[] }
+  // Only modules with blockDefs (from real XML) contribute to resolution.
+  // Modules without blockDefs (demo data) still appear as keys so cross-module
+  // blocks from them pass the visibility filter.
+  const blockResolver = useMemo(() => {
+    const res = {}
+    for (const mod of modules) {
+      res[mod.name] = mod.blockDefs || {}
+    }
+    return res
+  }, [modules])
+
   const activeModule = modules[activeIdx]
 
   const groupedScreens = activeModule
@@ -346,6 +358,7 @@ export default function App() {
                         key={`${screen.name}-${i}`}
                         screen={screen}
                         moduleName={activeModule.name}
+                        blockResolver={blockResolver}
                       />
                     ))}
                   </div>
